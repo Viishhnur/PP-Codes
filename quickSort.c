@@ -1,82 +1,74 @@
-#include <iostream>
-#include <cstdlib>
+#include <stdio.h>
 #include <cuda_runtime.h>
 
-#define MAX_DEPTH 5  // Adjust depth for recursion control
+__device__ void swap(int *arr, int i, int j) {
+    int temp = arr[i];
+    arr[i] = arr[j];
+    arr[j] = temp;
+}
 
-__device__ int partition(int* array, int left, int right) {
-    int pivot = array[right];
-    int i = left - 1;
+// Lomuto partition scheme
+__device__ int partition(int *arr, int low, int high) {
+    int pivot = arr[high];
+    int i = low - 1;
 
-    for (int j = left; j < right; j++) {
-        if (array[j] <= pivot) {
+    for (int j = low; j < high; j++) {
+        if (arr[j] < pivot) {
             i++;
-            // Swap elements
-            int temp = array[i];
-            array[i] = array[j];
-            array[j] = temp;
+            swap(arr, i, j);
         }
     }
-    // Swap pivot into correct position
-    int temp = array[i + 1];
-    array[i + 1] = array[right];
-    array[right] = temp;
 
+    swap(arr, i + 1, high);
     return i + 1;
 }
 
-__global__ void quicksort(int* array, int left, int right, int depth) {
-    if (depth <= 0 || left >= right) {
-        // Use insertion sort for small chunks or deep recursion
-        for (int i = left + 1; i <= right; i++) {
-            int j = i;
-            while (j > left && array[j - 1] > array[j]) {
-                int temp = array[j];
-                array[j] = array[j - 1];
-                array[j - 1] = temp;
-                j--;
-            }
-        }
+// QuickSort kernel
+__global__ void quickSort(int *arr, int low, int high, int depth) {
+    if (depth <= 0 || low >= high) {
         return;
     }
 
-    int pivotIndex = partition(array, left, right);
+    int pivotIdx = partition(arr, low, high);
 
-    // Launch recursive kernel calls
-    if (left < pivotIndex) {
-        quicksort<<<1, 1>>>(array, left, pivotIndex - 1, depth - 1);
+    // Launch new CUDA threads for recursion
+    if (low < pivotIdx) {
+        quickSort<<<1, 1>>>(arr, low, pivotIdx - 1, depth - 1);
     }
-    if (pivotIndex < right) {
-        quicksort<<<1, 1>>>(array, pivotIndex + 1, right, depth - 1);
+    if (pivotIdx < high) {
+        quickSort<<<1, 1>>>(arr, pivotIdx + 1, high, depth - 1);
     }
 }
 
-int main() {
-    const int arraySize = 1000;  
-    const int arrayBytes = arraySize * sizeof(int);
-    
-    int* hostArray = new int[arraySize];
-    int* deviceArray;
+// Host function to launch CUDA kernel
+void sortArray(int *arr, int n) {
+    int *d_arr;
+    size_t size = n * sizeof(int);
 
-    // Initialize array with random values
-    for (int i = 0; i < arraySize; i++) {
-        hostArray[i] = rand() % 1000;
-    }
+    cudaMalloc((void **)&d_arr, size);
+    cudaMemcpy(d_arr, arr, size, cudaMemcpyHostToDevice);
 
-    // Allocate memory on GPU and copy data
-    cudaMalloc((void**)&deviceArray, arrayBytes);
-    cudaMemcpy(deviceArray, hostArray, arrayBytes, cudaMemcpyHostToDevice);
-
-    // Launch QuickSort kernel
-    quicksort<<<1, 1>>>(deviceArray, 0, arraySize - 1, MAX_DEPTH);
+    quickSort<<<1, 1>>>(d_arr, 0, n - 1, 10); // Launch with recursion depth 10
     cudaDeviceSynchronize();
 
-    // Copy sorted array back to host
-    cudaMemcpy(hostArray, deviceArray, arrayBytes, cudaMemcpyDeviceToHost);
+    cudaMemcpy(arr, d_arr, size, cudaMemcpyDeviceToHost);
+    cudaFree(d_arr);
+}
 
-    // Cleanup
-    delete[] hostArray;
-    cudaFree(deviceArray);
+int main() {
+    int n;
+    scanf("%d", &n);
+    int arr[n];
 
+    for (int i = 0; i < n; i++) {
+        scanf("%d", &arr[i]);
+    }
+
+    sortArray(arr, n);
+
+    for (int i = 0; i < n; i++) {
+        printf("%d ", arr[i]);
+    }
+    
     return 0;
 }
